@@ -59,3 +59,4 @@ fedora_task:
         script:
                 - ./configure --with-libarchive.pc
                 - make -j4 || make V=1
+        check_script: make check || { kyua report --verbose ; exit 1 ; }
