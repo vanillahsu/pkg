@@ -49,7 +49,6 @@ static ucl_object_t *keyword_schema = NULL;
 
 static int setprefix(struct plist *, char *, struct file_attr *);
 static int dir(struct plist *, char *, struct file_attr *);
-static int dirrm(struct plist *, char *, struct file_attr *);
 static int file(struct plist *, char *, struct file_attr *);
 static int setmod(struct plist *, char *, struct file_attr *);
 static int setowner(struct plist *, char *, struct file_attr *);
@@ -66,8 +65,6 @@ static struct action_cmd {
 	size_t namelen;
 } list_actions[] = {
 	{ "setprefix", setprefix, 9},
-	{ "dirrm", dirrm, 5 },
-	{ "dirrmtry", dirrm, 7 },
 	{ "dir", dir, 3 },
 	{ "file", file, 4 },
 	{ "setmode", setmod, 6 },
@@ -267,27 +264,6 @@ dir(struct plist *p, char *line, struct file_attr *a)
 	}
 
 	return (ret);
-}
-
-static void
-warn_deprecated_dir(void)
-{
-	static bool warned_deprecated_dir = false;
-
-	if (warned_deprecated_dir)
-		return;
-	warned_deprecated_dir = true;
-
-	pkg_emit_error("Warning: @dirrm[try] is deprecated, please"
-	    " use @dir");
-}
-
-static int
-dirrm(struct plist *p, char *line, struct file_attr *a)
-{
-
-	warn_deprecated_dir();
-	return (dir(p, line, a));
 }
 
 static int
@@ -552,8 +528,6 @@ static struct keyact {
 	{ "comment", comment_key },
 	{ "config", config },
 	{ "dir", dir },
-	{ "dirrm", dirrm },
-	{ "dirrmtry", dirrm },
 	{ "mode", setmod },
 	{ "owner", setowner },
 	{ "group", setgroup },
