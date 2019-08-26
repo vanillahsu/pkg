@@ -535,21 +535,16 @@ should_be_post(char *cmd, struct plist *p)
 }
 
 typedef enum {
-	EXEC = 0,
-	UNEXEC,
-	PREEXEC,
+	PREEXEC = 0,
 	POSTEXEC,
 	PREUNEXEC,
 	POSTUNEXEC
 } exec_t;
 
 static int
-meta_exec(struct plist *p, char *line, struct file_attr *a, exec_t type)
+meta_exec(struct plist *p, char *line, struct file_attr *a __unused, exec_t type)
 {
-	char *cmd, *buf, *tmp;
-	char comment[2];
-	char path[MAXPATHLEN];
-	regmatch_t pmatch[2];
+	char *cmd;
 	int ret;
 
 	ret = format_exec_cmd(&cmd, line, p->prefix, p->last_file, NULL, 0,
@@ -569,83 +564,6 @@ meta_exec(struct plist *p, char *line, struct file_attr *a, exec_t type)
 		break;
 	case POSTUNEXEC:
 		utstring_printf(p->post_deinstall_buf, "%s\n", cmd);
-		break;
-	case UNEXEC:
-		comment[0] = '\0';
-		/* workaround to detect the @dirrmtry */
-		if (STARTS_WITH(cmd, "rmdir ") || STARTS_WITH(cmd, "/bin/rmdir ")) {
-			comment[0] = '#';
-			comment[1] = '\0';
-
-			/* remove the glob if any */
-			if (strchr(cmd, '*'))
-				comment[0] = '\0';
-
-			buf = cmd;
-
-			/* start remove mkdir -? */
-			/* remove the command */
-			while (!isspace(buf[0]))
-				buf++;
-
-			while (isspace(buf[0]))
-				buf++;
-
-			if (buf[0] == '-')
-				comment[0] = '\0';
-			/* end remove mkdir -? */
-		}
-
-		if (should_be_post(cmd, p)) {
-			if (comment[0] != '#')
-				utstring_printf(p->post_deinstall_buf,
-				    "%s%s\n", comment, cmd);
-		} else {
-			utstring_printf(p->pre_deinstall_buf, "%s%s\n", comment, cmd);
-		}
-		if (comment[0] == '#') {
-			buf = cmd;
-			regex_t preg;
-
-			/* remove the @dirrm{,try}
-			 * command */
-			while (!isspace(buf[0]))
-				buf++;
-
-			if ((tmp = strchr(buf, '|')) != NULL)
-				tmp[0] = '\0';
-
-			if (strstr(buf, "\"/")) {
-				regcomp(&preg, "[[:space:]]\"(/[^\"]+)",
-				    REG_EXTENDED);
-				while (regexec(&preg, buf, 2, pmatch, 0) == 0) {
-					strlcpy(path, &buf[pmatch[1].rm_so],
-					    pmatch[1].rm_eo - pmatch[1].rm_so + 1);
-					buf+=pmatch[1].rm_eo;
-					if (!strcmp(path, "/dev/null"))
-						continue;
-					dir(p, path, a);
-					a = NULL;
-				}
-			} else {
-				regcomp(&preg, "[[:space:]](/[[:graph:]/]+)",
-				    REG_EXTENDED);
-				while (regexec(&preg, buf, 2, pmatch, 0) == 0) {
-					strlcpy(path, &buf[pmatch[1].rm_so],
-					    pmatch[1].rm_eo - pmatch[1].rm_so + 1);
-					buf+=pmatch[1].rm_eo;
-					if (!strcmp(path, "/dev/null"))
-						continue;
-					dir(p, path, a);
-					a = NULL;
-				}
-			}
-			regfree(&preg);
-
-		}
-		break;
-	case EXEC:
-		utstring_printf(p->post_install_buf, "%s\n", cmd);
 		break;
 	}
 
@@ -677,32 +595,6 @@ postexec(struct plist *p, char *line, struct file_attr *a)
 	return (meta_exec(p, line, a, POSTEXEC));
 }
 
-static int
-exec(struct plist *p, char *line, struct file_attr *a)
-{
-	static bool warned_deprecated_exec = false;
-
-	if (!warned_deprecated_exec) {
-		warned_deprecated_exec = true;
-		pkg_emit_error("Warning: @exec is deprecated, please"
-		    " use @[pre|post][un]exec");
-	}
-	return (meta_exec(p, line, a, EXEC));
-}
-
-static int
-unexec(struct plist *p, char *line, struct file_attr *a)
-{
-	static bool warned_deprecated_unexec = false;
-
-	if (!warned_deprecated_unexec) {
-		warned_deprecated_unexec = true;
-		pkg_emit_error("Warning: @unexec is deprecated, please"
-		    " use @[pre|post]unexec");
-	}
-	return (meta_exec(p, line, a, UNEXEC));
-}
-
 static struct keyact {
 	const char *key;
 	int (*action)(struct plist *, char *, struct file_attr *);
@@ -717,8 +609,6 @@ static struct keyact {
 	{ "mode", setmod },
 	{ "owner", setowner },
 	{ "group", setgroup },
-	{ "exec", exec },
-	{ "unexec", unexec },
 	{ "preexec", preexec },
 	{ "postexec", postexec },
 	{ "preunexec", preunexec },
