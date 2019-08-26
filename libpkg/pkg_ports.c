@@ -55,9 +55,6 @@ static int setowner(struct plist *, char *, struct file_attr *);
 static int setgroup(struct plist *, char *, struct file_attr *);
 static int comment_key(struct plist *, char *, struct file_attr *);
 static int config(struct plist *, char *, struct file_attr *);
-/* compat with old packages */
-static int name_key(struct plist *, char *, struct file_attr *);
-static int pkgdep(struct plist *, char *, struct file_attr *);
 
 static struct action_cmd {
 	const char *name;
@@ -72,9 +69,6 @@ static struct action_cmd {
 	{ "setgroup", setgroup, 8 },
 	{ "comment", comment_key, 7 },
 	{ "config", config, 6 },
-	/* compat with old packages */
-	{ "name", name_key, 4 },
-	{ "pkgdep", pkgdep, 6 },
 	{ NULL, NULL, 0 }
 };
 
@@ -185,33 +179,6 @@ setprefix(struct plist *p, char *line, struct file_attr *a __unused)
 	utstring_printf(p->pre_deinstall_buf, "cd %s\n", p->prefix);
 	utstring_printf(p->post_deinstall_buf, "cd %s\n", p->prefix);
 
-	return (EPKG_OK);
-}
-
-static int
-name_key(struct plist *p, char *line, struct file_attr *a __unused)
-{
-	char *tmp;
-
-	if (p->pkg->name != NULL) {
-		return (EPKG_OK);
-	}
-	tmp = strrchr(line, '-');
-	tmp[0] = '\0';
-	tmp++;
-	p->pkg->name = xstrdup(line);
-	p->pkg->version = xstrdup(tmp);
-
-	return (EPKG_OK);
-}
-
-static int
-pkgdep(struct plist *p, char *line, struct file_attr *a __unused)
-{
-	if (*line != '\0') {
-		free(p->pkgdep);
-		p->pkgdep = xstrdup(line);
-	}
 	return (EPKG_OK);
 }
 
@@ -535,13 +502,6 @@ static struct keyact {
 	{ "postexec", postexec },
 	{ "preunexec", preunexec },
 	{ "postunexec", postunexec },
-	/* old pkg compat */
-	{ "name", name_key },
-	{ "pkgdep", pkgdep },
-	{ "mtree", comment_key },
-	{ "stopdaemon", comment_key },
-	{ "display", comment_key },
-	{ "conflicts", comment_key },
 	{ NULL, NULL },
 };
 
