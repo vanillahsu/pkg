@@ -11,6 +11,7 @@ SRCS=	add.c \
 	config.c \
 	create.c \
 	delete.c \
+	dump.c \
 	event.c \
 	fetch.c \
 	globals.c \

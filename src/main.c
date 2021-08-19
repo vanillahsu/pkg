@@ -95,6 +95,7 @@ static struct commands {
 	{ "config", "Display the value of the configuration options", exec_config, usage_config},
 	{ "create", "Creates software package distributions", exec_create, usage_create},
 	{ "delete", "Deletes packages from the database and the system", exec_delete, usage_delete},
+	{ "dump", "Dump packages information from the database and the system",  exec_dump, usage_dump},
 	{ "fetch", "Fetches packages from a remote repository", exec_fetch, usage_fetch},
 	{ "help", "Displays help information", exec_help, usage_help},
 	{ "info", "Displays information about installed packages", exec_info, usage_info},
