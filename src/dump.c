@@ -155,35 +155,3 @@ cleanup:
 
 	return (retcode);
 }
-
-FILE *
-output_open(const char *output_filename) {
-	FILE *out;
-
-	out = fopen(output_filename, "w");
-	if (out == NULL) {
-		fprintf(stderr, "Failed to open file for writing\n");
-		exit(7);
-	}
-
-	return out;
-}
-
-void
-output_close(FILE *out) {
-	int success;
-
-	success = fsync(fileno(out));
-	if (success != 0) {
-		fprintf(stderr, "Failed to sync file\n");
-		exit(7);
-	}
-
-	success = fclose(out);
-	if (success != 0) {
-		fprintf(stderr, "Failed to close file\n");
-		exit(7);
-	}
-
-	out = NULL;
-}
