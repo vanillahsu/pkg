@@ -1581,7 +1581,7 @@ static sql_prstmt sql_prepared_statements[PRSTMT_LAST] = {
 		" (SELECT id FROM packages WHERE name = ?1 ),"
 		" (SELECT annotation_id FROM annotation WHERE annotation = ?2),"
 		" (SELECT annotation_id FROM annotation WHERE annotation = ?3))",
-		"TTTT",
+		"TTTT", // "TTT"???
 	},
 	[ANNOTATE_DEL1] = {
 		NULL,
@@ -1590,7 +1590,7 @@ static sql_prstmt sql_prepared_statements[PRSTMT_LAST] = {
                 " (SELECT id FROM packages WHERE name = ?1) "
 		"AND tag_id IN"
 		" (SELECT annotation_id FROM annotation WHERE annotation = ?2)",
-		"TTT",
+		"TTT", // "TT"???
 	},
 	[ANNOTATE_DEL2] = {
 		NULL,
@@ -1754,6 +1754,7 @@ pkgdb_register_pkg(struct pkgdb *db, struct pkg *pkg, int forced,
 	int64_t			 package_id;
 
 	const char		*arch;
+	pkghash_it		hit;
 
 	assert(db != NULL);
 
@@ -1912,30 +1913,32 @@ pkgdb_register_pkg(struct pkgdb *db, struct pkg *pkg, int forced,
 	 * Insert categories
 	 */
 
-	kh_each_value(pkg->categories, buf, {
-		ret = run_prstmt(CATEGORY1, buf);
+	hit = pkghash_iterator(pkg->categories);
+	while (pkghash_next(&hit)) {
+		ret = run_prstmt(CATEGORY1, hit.key);
 		if (ret == SQLITE_DONE)
-			ret = run_prstmt(CATEGORY2, package_id, buf);
+			ret = run_prstmt(CATEGORY2, package_id, hit.key);
 		if (ret != SQLITE_DONE) {
 			ERROR_STMT_SQLITE(s, STMT(CATEGORY2));
 			goto cleanup;
 		}
-	});
+	}
 
 	/*
 	 * Insert licenses
 	 */
 
-	kh_each_value(pkg->licenses, buf, {
-		if (run_prstmt(LICENSES1, buf)
+	hit = pkghash_iterator(pkg->licenses);
+	while (pkghash_next(&hit)) {
+		if (run_prstmt(LICENSES1, hit.key)
 		    != SQLITE_DONE
 		    ||
-		    run_prstmt(LICENSES2, package_id, buf)
+		    run_prstmt(LICENSES2, package_id, hit.key)
 		    != SQLITE_DONE) {
 			ERROR_STMT_SQLITE(s, STMT(LICENSES2));
 			goto cleanup;
 		}
-	});
+	}
 
 	/*
 	 * Insert users
@@ -2085,13 +2088,13 @@ pkgdb_insert_lua_scripts(struct pkg *pkg, int64_t package_id, sqlite3 *s)
 int
 pkgdb_update_shlibs_required(struct pkg *pkg, int64_t package_id, sqlite3 *s)
 {
-	char	*shlib = NULL;
+	pkghash_it it = pkghash_iterator(pkg->shlibs_required);
 
-	while (pkg_shlibs_required(pkg, &shlib) == EPKG_OK) {
-		if (run_prstmt(SHLIBS1, shlib)
+	while (pkghash_next(&it)) {
+		if (run_prstmt(SHLIBS1, it.key)
 		    != SQLITE_DONE
 		    ||
-		    run_prstmt(SHLIBS_REQD, package_id, shlib)
+		    run_prstmt(SHLIBS_REQD, package_id, it.key)
 		    != SQLITE_DONE) {
 			ERROR_STMT_SQLITE(s, STMT(SHLIBS_REQD));
 			return (EPKG_FATAL);
@@ -2120,13 +2123,13 @@ pkgdb_update_config_file_content(struct pkg *p, sqlite3 *s)
 int
 pkgdb_update_shlibs_provided(struct pkg *pkg, int64_t package_id, sqlite3 *s)
 {
-	char	*shlib = NULL;
+	pkghash_it it = pkghash_iterator(pkg->shlibs_provided);
 
-	while (pkg_shlibs_provided(pkg, &shlib) == EPKG_OK) {
-		if (run_prstmt(SHLIBS1, shlib)
+	while (pkghash_next(&it)) {
+		if (run_prstmt(SHLIBS1, it.key)
 		    != SQLITE_DONE
 		    ||
-		    run_prstmt(SHLIBS_PROV, package_id, shlib)
+		    run_prstmt(SHLIBS_PROV, package_id, it.key)
 		    != SQLITE_DONE) {
 			ERROR_STMT_SQLITE(s, STMT(SHLIBS_PROV));
 			return (EPKG_FATAL);
@@ -2139,13 +2142,13 @@ pkgdb_update_shlibs_provided(struct pkg *pkg, int64_t package_id, sqlite3 *s)
 int
 pkgdb_update_requires(struct pkg *pkg, int64_t package_id, sqlite3 *s)
 {
-	char	*require = NULL;
+	pkghash_it it = pkghash_iterator(pkg->requires);
 
-	while (pkg_requires(pkg, &require) == EPKG_OK) {
-		if (run_prstmt(REQUIRE, require)
+	while (pkghash_next(&it)) {
+		if (run_prstmt(REQUIRE, it.key)
 		    != SQLITE_DONE
 		    ||
-		    run_prstmt(PKG_REQUIRE, package_id, require)
+		    run_prstmt(PKG_REQUIRE, package_id, it.key)
 		    != SQLITE_DONE) {
 			ERROR_STMT_SQLITE(s, STMT(PKG_REQUIRE));
 			return (EPKG_FATAL);
@@ -2158,13 +2161,13 @@ pkgdb_update_requires(struct pkg *pkg, int64_t package_id, sqlite3 *s)
 int
 pkgdb_update_provides(struct pkg *pkg, int64_t package_id, sqlite3 *s)
 {
-	char	*provide = NULL;
+	pkghash_it it = pkghash_iterator(pkg->provides);
 
-	while (pkg_provides(pkg, &provide) == EPKG_OK) {
-		if (run_prstmt(PROVIDE, provide)
+	while (pkghash_next(&it)) {
+		if (run_prstmt(PROVIDE, it.key)
 		    != SQLITE_DONE
 		    ||
-		    run_prstmt(PKG_PROVIDE, package_id, provide)
+		    run_prstmt(PKG_PROVIDE, package_id, it.key)
 		    != SQLITE_DONE) {
 			ERROR_STMT_SQLITE(s, STMT(PKG_PROVIDE));
 			return (EPKG_FATAL);
@@ -3107,8 +3110,8 @@ pkgdb_begin_solver(struct pkgdb *db)
 	int rc = EPKG_OK;
 	int64_t cnt = 0, cur = 0;
 
-	it = pkgdb_query(db, " WHERE manifestdigest IS NULL OR manifestdigest==''",
-		MATCH_CONDITION);
+	it = pkgdb_query_cond(db, " WHERE manifestdigest IS NULL OR manifestdigest==''",
+		NULL, MATCH_ALL);
 	if (it != NULL) {
 		kv_init(pkglist);
 		while (pkgdb_it_next(it, &p, PKG_LOAD_BASIC|PKG_LOAD_OPTIONS) == EPKG_OK) {

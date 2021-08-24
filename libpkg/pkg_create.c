@@ -79,7 +79,7 @@ pkg_create_from_dir(struct pkg *pkg, const char *root,
 	 * Get / compute size / checksum if not provided in the manifest
 	 */
 
-	nfiles = kh_count(pkg->filehash);
+	nfiles = pkghash_count(pkg->filehash);
 	counter_init("file sizes/checksums", nfiles);
 
 	hardlinks = kh_init_hardlinks();
@@ -160,7 +160,7 @@ pkg_create_from_dir(struct pkg *pkg, const char *root,
 
 	counter_end();
 
-	nfiles = kh_count(pkg->dirhash);
+	nfiles = pkghash_count(pkg->dirhash);
 	counter_init("packing directories", nfiles);
 
 	while (pkg_dirs(pkg, &dir) == EPKG_OK) {
@@ -381,7 +381,7 @@ pkg_create(struct pkg_create *pc, const char *metadata, const char *plist,
 		return (EPKG_FATAL);
 	}
 
-	if ((ret = load_metadata(pkg, metadata, plist, pc->rootdir)) != EPKG_OK) {
+	if (load_metadata(pkg, metadata, plist, pc->rootdir) != EPKG_OK) {
 		pkg_free(pkg);
 		return (EPKG_FATAL);
 	}
@@ -596,6 +596,7 @@ pkg_create_staged(const char *outdir, pkg_formats format, const char *rootdir,
 	pkg_create_set_output_dir(pc, outdir);
 
 	ret = pkg_create(pc, md_dir, plist, hash);
+	pkg_create_free(pc);
 	return (ret);
 }
 

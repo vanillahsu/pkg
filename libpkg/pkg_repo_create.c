@@ -76,9 +76,8 @@ struct digest_list_entry {
 
 struct pkg_conflict_bulk {
 	struct pkg_conflict *conflicts;
-	kh_pkg_conflicts_t *conflictshash;
+	pkghash *conflictshash;
 	char *file;
-	UT_hash_handle hh;
 };
 
 static int
@@ -558,8 +557,14 @@ pkg_create_repo_read_pipe(int fd, struct digest_list_entry **dlist)
 	return (EPKG_OK);
 }
 
+#ifdef __linux__
+typedef const FTSENT *FTSENTP;
+#else
+typedef const FTSENT *const FTSENTP;
+#endif
+
 static int
-fts_compare(const FTSENT *const *a, const FTSENT *const *b)
+fts_compare(FTSENTP *a, FTSENTP *b)
 {
 	/* Sort files before directories, then alpha order */
 	if ((*a)->fts_info != FTS_D && (*b)->fts_info == FTS_D)
@@ -575,7 +580,8 @@ pkg_create_repo(char *path, const char *output_dir, bool filelist,
 {
 	FTS *fts = NULL;
 	struct pkg_fts_item *fts_items = NULL, *fts_cur, *fts_start;
-	struct pkg_conflict_bulk *conflicts = NULL, *curcb, *tmpcb;
+	pkghash *conflicts = NULL;
+	struct pkg_conflict_bulk *curcb;
 	int num_workers, i, remaining_workers, remain, cur_jobs, remain_jobs, nworker;
 	size_t len, tasks_per_worker, ntask;
 	struct digest_list_entry *dlist = NULL, *cur_dig, *dtmp;
@@ -585,12 +591,13 @@ pkg_create_repo(char *path, const char *output_dir, bool filelist,
 	int retcode = EPKG_FATAL;
 	ucl_object_t *meta_dump;
 	FILE *mfile;
+	pkghash_it it;
 
 	char *repopath[2];
 	char repodb[MAXPATHLEN];
 	FILE *mandigests = NULL;
 
-	outputdir_fd = mfd = ffd = -1;
+	mfd = ffd = -1;
 
 	if (!is_dir(path)) {
 		pkg_emit_error("%s is not a directory", path);
@@ -741,7 +748,7 @@ pkg_create_repo(char *path, const char *output_dir, bool filelist,
 	ntask = 0;
 	remaining_workers = num_workers;
 	while(remaining_workers > 0) {
-		int st, r;
+		int st;
 
 		pkg_debug(1, "checking for %d workers", remaining_workers);
 		retcode = poll(pfd, num_workers, -1);
@@ -757,7 +764,7 @@ pkg_create_repo(char *path, const char *output_dir, bool filelist,
 			for (i = 0; i < num_workers; i ++) {
 				if (pfd[i].fd != -1 &&
 								(pfd[i].revents & (POLLIN|POLLHUP|POLLERR))) {
-					if ((r = pkg_create_repo_read_pipe(pfd[i].fd, &dlist)) != EPKG_OK) {
+					if (pkg_create_repo_read_pipe(pfd[i].fd, &dlist) != EPKG_OK) {
 						/*
 						 * Wait for the worker finished
 						 */
@@ -790,7 +797,6 @@ pkg_create_repo(char *path, const char *output_dir, bool filelist,
 	}
 
 	pkg_emit_progress_tick(len, len);
-	retcode = EPKG_OK;
 
 	/* Now sort all digests */
 	if (meta->version == 1)
@@ -823,12 +829,15 @@ cleanup:
 		close(mfd);
 	if (ffd != -1)
 		close(ffd);
-	HASH_ITER (hh, conflicts, curcb, tmpcb) {
-		DL_FREE(curcb->conflicts, pkg_conflict_free);
-		kh_destroy_pkg_conflicts(curcb->conflictshash);
-		HASH_DEL(conflicts, curcb);
+	it = pkghash_iterator(conflicts);
+	while (pkghash_next(&it)) {
+		curcb = (struct pkg_conflict_bulk *)it.value;
+		LL_FREE(curcb->conflicts, pkg_conflict_free);
+		pkghash_destroy(curcb->conflictshash);
+		curcb->conflictshash = NULL;
 		free(curcb);
 	}
+	pkghash_destroy(conflicts);
 
 	if (pfd != NULL)
 		free(pfd);

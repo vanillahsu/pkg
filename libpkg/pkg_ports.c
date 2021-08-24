@@ -46,7 +46,6 @@
 #include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <uthash.h>
 #include <err.h>
 
 #include "pkg.h"
@@ -450,7 +449,7 @@ setgroup(struct plist *p, char *line, struct file_attr *a __unused)
 }
 
 static int
-comment_key(struct plist *p, char *line__unused , struct file_attr *a __unused)
+comment_key(struct plist *p __unused, char *line __unused , struct file_attr *a __unused)
 {
 	/* ignore md5 will be recomputed anyway */
 	return (EPKG_OK);
@@ -503,16 +502,17 @@ populate_keywords(struct plist *p)
 	for (i = 0; keyacts[i].key != NULL; i++) {
 		k = xcalloc(1, sizeof(struct keyword));
 		a = xmalloc(sizeof(struct action));
-		strlcpy(k->keyword, keyacts[i].key, sizeof(k->keyword));
+		k->keyword = xstrdup(keyacts[i].key);
 		a->perform = keyacts[i].action;
 		DL_APPEND(k->actions, a);
-		HASH_ADD_STR(p->keywords, keyword, k);
+		pkghash_safe_add(p->keywords, k->keyword, k, NULL);
 	}
 }
 
 static void
 keyword_free(struct keyword *k)
 {
+	free(k->keyword);
 	DL_FREE(k->actions, free);
 	free(k);
 }
@@ -884,7 +884,7 @@ static int
 parse_keywords(struct plist *plist, char *keyword,
     char *line, struct file_attr *attr)
 {
-	struct keyword *k;
+	struct keyword *k = NULL;
 	struct action *a;
 	int ret = EPKG_FATAL;
 
@@ -892,7 +892,7 @@ parse_keywords(struct plist *plist, char *keyword,
 	if (*keyword == '\0')
 		return (file(plist, line, attr));
 
-	HASH_FIND_STR(plist->keywords, keyword, k);
+	k = pkghash_get_value(plist->keywords, keyword);
 	if (k != NULL) {
 		LL_FOREACH(k->actions, a) {
 			ret = a->perform(plist, line, attr);
@@ -976,6 +976,7 @@ plist_parse_line(struct plist *plist, char *line)
 		if (buf == NULL) {
 			pkg_emit_error("Malformed keyword %s, expecting @keyword "
 			    "or @keyword(owner,group,mode)", bkpline);
+			free(bkpline);
 			return (EPKG_FATAL);
 		}
 
@@ -985,6 +986,7 @@ plist_parse_line(struct plist *plist, char *line)
 			    keyword, line);
 			/* FALLTHRU */
 		case EPKG_FATAL:
+			free(bkpline);
 			return (EPKG_FATAL);
 		}
 	} else {
@@ -995,10 +997,13 @@ plist_parse_line(struct plist *plist, char *line)
 		while (isspace(buf[0]))
 			buf++;
 
-		if (file(plist, buf, NULL) != EPKG_OK)
+		if (file(plist, buf, NULL) != EPKG_OK) {
+			free(bkpline);
 			return (EPKG_FATAL);
+		}
 	}
 
+	free(bkpline);
 	return (EPKG_OK);
 }
 
@@ -1049,7 +1054,11 @@ plist_free(struct plist *p)
 	if (p->plistdirfd != -1)
 		close(p->plistdirfd);
 
-	HASH_FREE(p->keywords, keyword_free);
+	pkghash_it it = pkghash_iterator(p->keywords);
+	while (pkghash_next(&it))
+		keyword_free((struct keyword *)it.value);
+	pkghash_destroy(p->keywords);
+	p->keywords = NULL;
 
 	free(p->uname);
 	free(p->gname);
@@ -1150,7 +1159,7 @@ ports_parse_plist(struct pkg *pkg, const char *plist, const char *stage)
 
 	pplist->plistdirfd = open_directory_of(plist);
 	if (pplist->plistdirfd == -1) {
-		pkg_emit_error("impossible to open the directory where the plist is", plist);
+		pkg_emit_error("impossible to open the directory where the plist is: %s", plist);
 		plist_free(pplist);
 		return (EPKG_FATAL);
 	}
@@ -1180,6 +1189,10 @@ ports_parse_plist(struct pkg *pkg, const char *plist, const char *stage)
 	return (rc);
 }
 
+/*
+ * if the provided database is NULL then we don't want to register the package
+ * in the database aka NO_PKG_REGISTER
+ */
 int
 pkg_add_port(struct pkgdb *db, struct pkg *pkg, const char *input_path,
     const char *reloc, bool testing)
@@ -1189,7 +1202,7 @@ pkg_add_port(struct pkgdb *db, struct pkg *pkg, const char *input_path,
 	xstring *message;
 	struct pkg_message *msg;
 
-	if (pkg_is_installed(db, pkg->name) != EPKG_END) {
+	if (db != NULL && pkg_is_installed(db, pkg->name) != EPKG_END) {
 		return(EPKG_INSTALLED);
 	}
 
@@ -1202,15 +1215,17 @@ pkg_add_port(struct pkgdb *db, struct pkg *pkg, const char *input_path,
 
 	pkg_emit_install_begin(pkg);
 
-	rc = pkgdb_register_pkg(db, pkg, 0, NULL);
+	if (db != NULL) {
+		rc = pkgdb_register_pkg(db, pkg, 0, NULL);
 
-	if (rc != EPKG_OK)
-		goto cleanup;
+		if (rc != EPKG_OK)
+			goto cleanup;
+	}
 
 	if (!testing) {
 		/* Execute pre-install scripts */
-		pkg_lua_script_run(pkg, PKG_SCRIPT_PRE_INSTALL, false);
-		pkg_script_run(pkg, PKG_LUA_PRE_INSTALL, false);
+		pkg_lua_script_run(pkg, PKG_LUA_PRE_INSTALL, false);
+		pkg_script_run(pkg, PKG_SCRIPT_PRE_INSTALL, false);
 
 		if (input_path != NULL) {
 			pkg_register_cleanup_callback(pkg_rollback_cb, pkg);
@@ -1218,13 +1233,14 @@ pkg_add_port(struct pkgdb *db, struct pkg *pkg, const char *input_path,
 			pkg_unregister_cleanup_callback(pkg_rollback_cb, pkg);
 			if (rc != EPKG_OK) {
 				pkg_rollback_pkg(pkg);
-				pkg_delete_dirs(db, pkg, NULL);
+				if (db != NULL)
+					pkg_delete_dirs(db, pkg, NULL);
 			}
 		}
 
 		/* Execute post-install scripts */
-		pkg_lua_script_run(pkg, PKG_SCRIPT_POST_INSTALL, false);
-		pkg_script_run(pkg, PKG_LUA_POST_INSTALL, false);
+		pkg_lua_script_run(pkg, PKG_LUA_POST_INSTALL, false);
+		pkg_script_run(pkg, PKG_SCRIPT_POST_INSTALL, false);
 	}
 
 	if (rc == EPKG_OK) {
@@ -1247,7 +1263,8 @@ pkg_add_port(struct pkgdb *db, struct pkg *pkg, const char *input_path,
 	}
 
 cleanup:
-	pkgdb_register_finale(db, rc, NULL);
+	if (db != NULL)
+		pkgdb_register_finale(db, rc, NULL);
 
 	return (rc);
 }

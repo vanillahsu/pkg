@@ -38,12 +38,12 @@
 #include <archive.h>
 #include <sqlite3.h>
 #include <stdbool.h>
-#include <uthash.h>
 #include <utlist.h>
 #include <ucl.h>
 
 #include "xmalloc.h"
 #include "private/utils.h"
+#include "pkghash.h"
 
 #define UCL_COUNT(obj) ((obj)?((obj)->len):0)
 
@@ -147,67 +147,6 @@
 			return (EPKG_OK);     \
 	} while (0)
 
-#define KHASH_MAP_INIT_STRING(name, khval_t)                                             \
-	KHASH_INIT(name, kh_cstr_t, khval_t, 1, string_hash_func, kh_str_hash_equal)
-
-#define kh_string_next(head, data) do {                  \
-	khint_t k;                                       \
-	if (head == NULL)                                \
-		return (EPKG_END);                       \
-	if (data == NULL) {                              \
-		k = kh_begin(head);                      \
-	} else {                                         \
-		k = kh_get_strings(head, (data));        \
-		k++;                                     \
-	}                                                \
-	while (k != kh_end(head) && !kh_exist(head, k))  \
-		k++;                                     \
-	if (k == kh_end(head))                           \
-		return (EPKG_END);                       \
-	data = kh_value(head, k);                        \
-	return (EPKG_OK);                                \
-} while (0)
-
-#define kh_next(name, head, data, attrib) do {           \
-	khint_t k;                                       \
-	if (head == NULL)                                \
-		return (EPKG_END);                       \
-	if (data == NULL) {                              \
-		k = kh_begin(head);                      \
-	} else {                                         \
-		k = kh_get_##name(head, (data)->attrib); \
-		k++;                                     \
-	}                                                \
-	while (k != kh_end(head) && !kh_exist(head, k))  \
-		k++;                                     \
-	if (k == kh_end(head)) {                         \
-		data = NULL;                             \
-		return (EPKG_END);                       \
-	}                                                \
-	data = kh_value(head, k);                        \
-	return (EPKG_OK);                                \
-} while (0)
-
-#define kh_free(name, head, type, free_func) do {			\
-	if (head) {							\
-		type *_todelete;					\
-		kh_foreach_value(head, _todelete, free_func(_todelete));\
-		kh_destroy_##name(head);				\
-		head = NULL;						\
-	}								\
-} while (0)
-
-#define kh_contains(name, h, v) ((h)?(kh_get_##name(h, v) != kh_end(h)):false)
-
-#define kh_each_value(h, vvar, code)							\
-	for (khint_t __i = kh_begin(h); h != NULL && __i != kh_end(h); __i++) {		\
-		if (!kh_exist(h, __i)) continue;					\
-		(vvar) = kh_val(h, __i);						\
-		code;									\
-	}
-
-#define kh_count(h) ((h)?((h)->size):0)
-
 #define kh_safe_add(name, h, val, k) do {		\
 	int __ret;					\
 	khint_t __i;					\
@@ -215,17 +154,6 @@
 	__i = kh_put_##name(h, k, &__ret);		\
 	if (__ret != 0)					\
 		kh_val(h, __i) = val;			\
-} while (0)
-
-#define kh_add(name, h, val, k, free_func) do {		\
-	int __ret;					\
-	khint_t __i;					\
-	if (!h) h = kh_init_##name();			\
-	__i = kh_put_##name(h, k, &__ret);		\
-	if (__ret != 0)					\
-		kh_val(h, __i) = val;			\
-	else						\
-		free_func(val);				\
 } while (0)
 
 #define kh_find(name, h, k, ret) do {			\
@@ -238,14 +166,6 @@
 		}					\
 	}						\
 } while (0)
-
-KHASH_MAP_INIT_STR(pkg_deps, struct pkg_dep *);
-KHASH_MAP_INIT_STR(pkg_files, struct pkg_file *);
-KHASH_MAP_INIT_STR(pkg_dirs, struct pkg_dir *);
-KHASH_MAP_INIT_STR(pkg_config_files, struct pkg_config_file *);
-KHASH_MAP_INIT_STR(strings, char *);
-KHASH_MAP_INIT_STR(pkg_options, struct pkg_option *);
-KHASH_MAP_INIT_STR(pkg_conflicts, struct pkg_conflict *);
 
 struct pkg_ctx {
 	int eventpipe;
@@ -265,7 +185,7 @@ struct pkg_ctx {
 	const char *backup_library_path;
 	bool triggers;
 	const char *triggers_path;
-	kh_strings_t *touched_dir_hash;
+	pkghash *touched_dir_hash;
 	bool defer_triggers;
 	bool repo_accept_legacy_pkg;
 };
@@ -311,27 +231,28 @@ struct pkg {
 	int64_t			 flatsize;
 	int64_t			 old_flatsize;
 	int64_t			 timestamp;
-	kh_pkg_deps_t		*depshash;
+	pkghash			*depshash;
 	struct pkg_dep		*depends;
-	kh_pkg_deps_t		*rdepshash;
+	pkghash			*rdepshash;
 	struct pkg_dep		*rdepends;
-	kh_strings_t		*categories;
-	kh_strings_t		*licenses;
-	kh_pkg_files_t		*filehash;
+	pkghash			*categories;
+	pkghash			*licenses;
+	pkghash			*filehash;
 	struct pkg_file		*files;
-	kh_pkg_dirs_t		*dirhash;
+	pkghash			*dirhash;
 	struct pkg_dir		*dirs;
-	kh_pkg_options_t	*optionshash;
+	pkghash			*optionshash;
 	struct pkg_option	*options;
-	kh_strings_t		*users;
-	kh_strings_t		*groups;
-	kh_strings_t		*shlibs_required;
-	kh_strings_t		*shlibs_provided;
-	kh_pkg_conflicts_t	*conflictshash;
+	pkghash			*users;
+	pkghash			*groups;
+	pkghash			*shlibs_required;
+	pkghash			*shlibs_provided;
+	pkghash			*conflictshash;
 	struct pkg_conflict	*conflicts;
-	kh_strings_t		*provides;
-	kh_strings_t		*requires;
-	kh_pkg_config_files_t	*config_files;
+	pkghash			*provides;
+	pkghash			*requires;
+	pkghash			*config_files_hash;
+	struct pkg_config_file	*config_files;
 	struct pkg_kv		*annotations;
 	unsigned			flags;
 	int		rootfd;
@@ -364,7 +285,7 @@ struct trigger {
 		int type;
 		bool sandbox;
 	} cleanup;
-	kh_strings_t *matched;
+	pkghash *matched;
 	struct trigger *prev, *next;
 };
 
@@ -440,6 +361,7 @@ struct pkg_config_file {
 	char *content;
 	char *newcontent;
 	merge_status status;
+	struct pkg_config_file *next, *prev;
 };
 
 struct pkg_file {
@@ -490,7 +412,6 @@ struct pkg_repo_meta_key {
 	char *pubkey;
 	char *pubkey_type; /* TODO: should be enumeration */
 	char *name;
-	UT_hash_handle hh;
 };
 
 typedef enum pkg_checksum_type_e {
@@ -528,7 +449,7 @@ struct pkg_repo_meta {
 	char *source_identifier;
 	int64_t revision;
 
-	struct pkg_repo_meta_key *keys;
+	pkghash *keys;
 
 	time_t eol;
 
@@ -565,7 +486,7 @@ struct pkg_repo_ops {
 
 	/* Query repo */
 	struct pkg_repo_it * (*query)(struct pkg_repo *,
-					const char *, match_t);
+					const char*, const char *, match_t);
 	struct pkg_repo_it * (*shlib_required)(struct pkg_repo *,
 					const char *);
 	struct pkg_repo_it * (*shlib_provided)(struct pkg_repo *,
@@ -611,8 +532,8 @@ struct pkg_repo {
 	FILE *ssh;
 	bool silent;
 
-	struct fingerprint *trusted_fp;
-	struct fingerprint *revoked_fp;
+	pkghash *trusted_fp;
+	pkghash *revoked_fp;
 
 	struct {
 		int in;
@@ -623,7 +544,6 @@ struct pkg_repo {
 	struct pkg_repo_meta *meta;
 
 	bool enable;
-	UT_hash_handle hh;
 
 	unsigned int priority;
 
@@ -632,13 +552,12 @@ struct pkg_repo {
 
 	/* Opaque repository data */
 	void *priv;
+	struct pkg_repo *next, *prev;
 };
 
 struct keyword {
-	/* 64 is more than enough for this */
-	char keyword[64];
+	char *keyword;
 	struct action *actions;
-	UT_hash_handle hh;
 };
 
 struct plist {
@@ -665,7 +584,7 @@ struct plist {
 		size_t len;
 		size_t cap;
 	} post_patterns;
-	struct keyword *keywords;
+	pkghash *keywords;
 };
 
 struct file_attr {
@@ -750,7 +669,6 @@ typedef enum {
 struct fingerprint {
 	hash_t type;
 	char hash[BUFSIZ];
-	UT_hash_handle hh;
 };
 int pkg_repo_load_fingerprints(struct pkg_repo *repo);
 
@@ -884,7 +802,7 @@ int pkg_adddir(struct pkg *pkg, const char *path, bool check_duplicates);
 int pkg_adddir_attr(struct pkg *pkg, const char *path, const char *uname,
     const char *gname, mode_t perm, u_long fflags, bool check_duplicates);
 
-int pkg_addstring(kh_strings_t **s, const char *value, const char *title);
+int pkg_addstring(pkghash **s, const char *value, const char *title);
 int pkg_kv_add(struct pkg_kv **kv, const char *key, const char *value, const char *title);
 const char *pkg_kv_get(struct pkg_kv *const*kv, const char *key);
 int pkg_adduser(struct pkg *pkg, const char *name);
