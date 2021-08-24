@@ -23,6 +23,7 @@ SRCS=	add.c \
 	query.c \
 	register.c \
 	repo.c \
+	restore.c \
 	rquery.c \
 	search.c \
 	set.c \
